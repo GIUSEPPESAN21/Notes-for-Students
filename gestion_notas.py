@@ -1,48 +1,50 @@
 # -*- coding: utf-8 -*-
 """
-Laboratorio #2: Gestión de Notas (Versión Streamlit Mejorada)
+Laboratorio #2: Gestión de Notas (Versión Streamlit v3 - Funcionalidad Extendida)
 
-Fundamentación Arquitectónica (v2):
-Esta versión abandona el panel lateral (sidebar) en favor de una
-navegación principal por pestañas (`st.tabs`), similar a la UI de React.
+Fundamentación Arquitectónica (v3):
+Esta versión se basa en la v2 (navegación por pestañas) y añade
+funcionalidades avanzadas de análisis, exportación y gestión.
 
 1.  Manejo de Estado (st.session_state):
-    Se mantiene como el pilar de la persistencia de datos,
-    almacenando 'students' y 'modification_attempts'.
+    Se mantiene como pilar, sin cambios en la estructura.
 
 2.  Navegación en Página (st.tabs):
-    Reemplaza `st.sidebar.radio` por `st.tabs`. Esto mueve
-    la navegación al cuerpo principal, como solicitó el usuario,
-    creando una experiencia de "Single Page Application" (SPA) más moderna.
+    Se renombra la pestaña "Mostrar Notas" a "Reporte General" y
+    "Eliminar" a "Administración" para reflejar las nuevas
+    funcionalidades.
 
 3.  Estética Mejorada (CSS + Componentes Nativos):
-    - Se inyecta CSS personalizado (`st.markdown(..., unsafe_allow_html=True)`)
-      para dar a los formularios (`st.form`) un aspecto de "tarjeta"
-      (sombra, bordes redondeados) y para estilizar los botones
-      con gradientes y sombras, imitando el diseño de React.
-    - Se usan `st.metric` para mostrar estadísticas clave (Promedio y Total)
-      de forma visualmente atractiva.
-    - Se usan `st.toast` para notificaciones no intrusivas, en lugar de
-      los `st.success/error` estáticos.
+    Se mantiene el CSS de la v2.
 
-4.  Funcionalidad Completa:
-    Se añade la lógica para *Eliminar* estudiantes, una característica
-    presente en la versión de React, para completar el CRUD
-    (Create, Read, Update, Delete).
+4.  Funcionalidad Extendida (Novedades):
+    - Se añaden métricas de 'Nota Alta' y 'Nota Baja'.
+    - Se calcula un 'Estado' (Aprobado/Reprobado) para cada estudiante
+      en el DataFrame.
+    - Se añade un `st.bar_chart` para visualizar la distribución de notas.
+    - Se implementa un `st.text_input` para filtrar (buscar) estudiantes
+      en el reporte.
+    - Se añade un `st.download_button` para exportar los datos a CSV.
+    - Se añade una "Zona de Peligro" para reiniciar (limpiar)
+      todos los datos de la sesión con confirmación.
 """
 
 import streamlit as st
 import pandas as pd
+import numpy as np # Necesario para algunas estadísticas
 
 # --- Configuración de la Página ---
-# layout="wide" aprovecha mejor el espacio
 st.set_page_config(
     page_title="Sistema de Gestión de Notas",
     page_icon="🎓",
     layout="centered"
 )
 
-# --- CSS Personalizado para un Look Moderno (Inspirado en React/Tailwind) ---
+# --- Constantes del Programa ---
+MODIFICATION_LIMIT = 3
+PASSING_GRADE = 3.0 # Nota mínima para aprobar (escala 1-5)
+
+# --- CSS Personalizado (v2) ---
 st.markdown("""
 <style>
 /* Estilo para el título principal */
@@ -85,7 +87,7 @@ button[kind="primary"].st-emotion-cache-s49nzw {
     background-color: #DC2626;
     border: none;
 }
-button[kind="primary"].st-emotion-cache-s49nzw:hover {
+button[kind...].st-emotion-cache-s49nzw:hover {
     background-color: #B91C1C;
 }
 </style>
@@ -98,9 +100,6 @@ if 'students' not in st.session_state:
 if 'modification_attempts' not in st.session_state:
     st.session_state.modification_attempts = {}
 
-# Constante para el límite
-MODIFICATION_LIMIT = 3
-
 # --- Lógica de Negocio (Controladores) ---
 
 def find_student_index(name):
@@ -110,18 +109,22 @@ def find_student_index(name):
             return i
     return None
 
-def calculate_average():
-    """Calcula el promedio. Retorna el promedio o 0 si está vacío."""
+def get_stats():
+    """
+    Calcula todas las estadísticas: promedio, alta y baja.
+    Retorna un diccionario con las estadísticas.
+    """
     if not st.session_state.students:
-        return 0.0  # Requisito 3c: Manejar división por cero
+        return {"average": 0.0, "high": 0.0, "low": 0.0}
 
     try:
-        total = sum(student['nota'] for student in st.session_state.students)
-        average = total / len(st.session_state.students)
-        return average
-    except ZeroDivisionError:
-        # Doble chequeo por seguridad
-        return 0.0
+        notes = [student['nota'] for student in st.session_state.students]
+        average = np.mean(notes)
+        high = np.max(notes)
+        low = np.min(notes)
+        return {"average": average, "high": high, "low": low}
+    except Exception:
+        return {"average": 0.0, "high": 0.0, "low": 0.0}
 
 def delete_student(name):
     """Elimina un estudiante de la lista y sus intentos."""
@@ -134,42 +137,80 @@ def delete_student(name):
         return True
     return False
 
+def reset_all_data():
+    """Elimina todos los datos de la sesión."""
+    st.session_state.students = []
+    st.session_state.modification_attempts = {}
+
+
 # --- UI Principal ---
 st.title("🎓 Sistema de Gestión de Notas")
 st.write("Bienvenido al sistema. Navegue usando las pestañas a continuación.")
 
 # --- Navegación por Pestañas (En lugar del Sidebar) ---
-tab_display, tab_add, tab_modify, tab_delete = st.tabs([
-    "📊 Mostrar Notas",
+tab_display, tab_add, tab_modify, tab_admin = st.tabs([
+    "📊 Reporte General",
     "➕ Ingresar Nota",
     "✏️ Modificar Nota",
-    "🗑️ Eliminar Estudiante"
+    "🗑️ Administración"
 ])
 
 
-# --- Pestaña 1: Mostrar Promedio y Notas (Actividad 3) ---
+# --- Pestaña 1: Reporte General (Actividad 3 Mejorada) ---
 with tab_display:
-    st.header("Actividad 3: Reporte de Notas")
+    st.header("Actividad 3: Reporte General y Análisis")
     
     if not st.session_state.students:
         st.info("Aún no se han ingresado estudiantes. Agregue uno en la pestaña 'Ingresar Nota'.")
     else:
-        # 3.b. Calcular el promedio
-        average_grade = calculate_average()
+        # 1. Obtener estadísticas
+        stats = get_stats()
 
-        # Tarjetas de métricas (inspirado en React)
-        col1, col2 = st.columns(2)
-        col1.metric(label="Total Estudiantes", value=len(st.session_state.students))
-        col2.metric(label="Promedio General", value=f"{average_grade:.2f}")
+        # 2. Tarjetas de métricas (inspirado en React)
+        st.subheader("Estadísticas del Curso")
+        col1, col2, col3 = st.columns(3)
+        col1.metric(label="Promedio General", value=f"{stats['average']:.2f}")
+        col2.metric(label="Nota Más Alta", value=f"{stats['high']:.2f}")
+        col3.metric(label="Nota Más Baja", value=f"{stats['low']:.2f}")
+
+        st.divider()
+
+        # 3. Listado de Estudiantes (con búsqueda y estado)
+        st.subheader("Listado de Estudiantes")
+        
+        # 3.a. Creación del DataFrame
+        df = pd.DataFrame(st.session_state.students)
+        # 3.b. Añadir columna de Estado
+        df['Estado'] = df['nota'].apply(lambda nota: "Aprobado" if nota >= PASSING_GRADE else "Reprobado")
+        
+        # 3.c. Implementar Búsqueda
+        search_term = st.text_input("Buscar Estudiante por nombre:", placeholder="Escriba un nombre para filtrar...")
+        if search_term:
+            filtered_df = df[df['nombre'].str.contains(search_term, case=False, na=False)]
+        else:
+            filtered_df = df
+            
+        # 3.d. Mostrar la tabla
+        st.dataframe(filtered_df, use_container_width=True)
+
+        # 4. Gráfico de Distribución
+        st.subheader("Distribución de Notas")
+        # Contamos cuántos estudiantes hay por cada nota
+        note_counts = df['nota'].value_counts().sort_index()
+        st.bar_chart(note_counts)
 
         st.divider()
         
-        # 3.a. Mostrar todas las notas
-        st.subheader("Listado de Estudiantes")
-        
-        # Usamos Pandas para un mejor formato de tabla
-        df = pd.DataFrame(st.session_state.students)
-        st.dataframe(df, use_container_width=True)
+        # 5. Exportar a CSV
+        st.subheader("Exportar Datos")
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Descargar Reporte en CSV",
+            data=csv,
+            file_name="reporte_estudiantes.csv",
+            mime="text/csv",
+        )
+
 
 # --- Pestaña 2: Ingresar Notas (Actividad 1) ---
 with tab_add:
@@ -245,10 +286,11 @@ with tab_modify:
                         st.toast(f"Nota de '{selected_name}' actualizada.", icon="✅")
                         st.info(f"Intentos restantes para '{selected_name}': {MODIFICATION_LIMIT - (attempts + 1)}")
 
-# --- Pestaña 4: Eliminar Estudiante (Funcionalidad Añadida) ---
-with tab_delete:
-    st.header("Eliminar Estudiante del Sistema")
-
+# --- Pestaña 4: Administración (Eliminar) ---
+with tab_admin:
+    st.header("Administración del Sistema")
+    
+    st.subheader("Eliminar un Estudiante")
     if not st.session_state.students:
         st.info("No hay estudiantes ingresados para eliminar.")
     else:
@@ -260,7 +302,7 @@ with tab_delete:
             placeholder="Seleccionar estudiante..."
         )
         
-        st.warning("⚠️ Esta acción es permanente y no se puede deshacer.", icon="🚨")
+        st.warning("⚠️ Esta acción es permanente.", icon="🚨")
 
         if delete_selected_name:
             # Usamos type="primary" que nuestro CSS pintará de rojo
@@ -270,4 +312,16 @@ with tab_delete:
                     st.rerun() # Recargamos para actualizar los selectores
                 else:
                     st.error("No se pudo eliminar al estudiante.")
+
+    st.divider()
+
+    # Zona de Peligro (Nueva Funcionalidad)
+    st.subheader("⚠️ Zona de Peligro")
+    st.write("Estas acciones no se pueden deshacer.")
+    
+    if st.checkbox("Deseo reiniciar todo el sistema y eliminar TODOS los estudiantes."):
+        if st.button("Eliminar TODOS los datos", type="primary"):
+            reset_all_data()
+            st.toast("Todos los datos han sido eliminados.", icon="🔥")
+            st.rerun()
 
