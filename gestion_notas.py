@@ -179,9 +179,9 @@ with tab_add:
     with st.form(key="add_student_form"):
         name = st.text_input("Nombre del Estudiante", placeholder="Ej. Ana Pérez")
         grade = st.number_input(
-            "Nota (0.0 - 100.0)",
-            min_value=0.0,
-            max_value=100.0,
+            "Nota (1.0 - 5.0)",
+            min_value=1.0,
+            max_value=5.0,
             step=0.1
         )
         # El botón dentro del form usará el CSS personalizado
@@ -229,8 +229,8 @@ with tab_modify:
                 with st.form(key="modify_student_form"):
                     new_grade = st.number_input(
                         f"Nueva nota para {selected_name} (actual: {current_grade})",
-                        min_value=0.0,
-                        max_value=100.0,
+                        min_value=1.0,
+                        max_value=5.0,
                         step=0.1,
                         value=current_grade # Pre-llenamos
                     )
@@ -270,3 +270,4 @@ with tab_delete:
                     st.rerun() # Recargamos para actualizar los selectores
                 else:
                     st.error("No se pudo eliminar al estudiante.")
+
